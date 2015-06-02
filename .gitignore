@@ -1,0 +1,5 @@
+__pycache__
+*.pyc
+.idea
+interactive.py
+dump.py
