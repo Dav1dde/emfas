@@ -1,10 +1,20 @@
 from __future__ import unicode_literals
 
 import json
+import os
 from gevent import subprocess
 
 
-_echoprint_codegen = 'echoprint-codegen'
+def find_echoprint_codegen():
+    # TODO improve
+    # https://github.com/echonest/pyechonest/commit/764fd569245c9b03c72f149066e5bf5ccba97a6b
+    ret = os.getenv('ECHOPRINT_CODEGEN')
+    if ret is not None:
+        return ret
+
+    return 'echoprint-codegen'
+
+_echoprint_codegen = find_echoprint_codegen()
 
 
 def codegen(filename, start=-1, duration=-1, codegen_exe=None):
