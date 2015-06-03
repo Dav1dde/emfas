@@ -2,6 +2,10 @@ from __future__ import unicode_literals
 
 import json
 import requests
+import logging
+
+
+logger = logging.getLogger('emfas')
 
 
 class MoomashAPIException(Exception):
@@ -38,10 +42,13 @@ class MoomashAPI(object):
             params=[('api_key', self.api_key)]
         )
         j = response.json()
+        logger.debug('Moomash response: {0!r}'.format(j))
         if not response.ok:
             raise MoomashAPIException.from_json(j)
 
-        return [Song.from_json(song) for song in j['response']['songs']]
+        # sometimes songs looks like that...
+        # {u'songs': [{}]}
+        return [Song.from_json(song) for song in j['response']['songs'] if song]
 
 
 class Song(object):
