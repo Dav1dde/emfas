@@ -1,3 +1,5 @@
+from __future__ import unicode_literals
+
 from gevent import monkey
 monkey.patch_all()
 
@@ -9,6 +11,7 @@ import logging
 import tempfile
 import gevent.queue
 import gevent.pool
+from itertools import islice
 from emfas.codegen import codegen
 from emfas.moomash import MoomashAPI
 
@@ -48,17 +51,62 @@ class Emfas(object):
             segment_provider.close()
         logger.info('Emfas worker stopped')
 
-    def identify(self):
-        logger.debug('{0}/{1} segments available'.format(
-                     len(self._queue), self._queue.maxlen))
+    def identify(self, segments=None, score=50):
+        """
+        Identify the currently playing song
+
+        :param segments: A list of number of
+        segments to try and identify. If any segment yields a song,
+        with an acceptable score, the song will be returned immediately.
+        :return: A list of moomash.Song objects
+        :rtype: emfas.moomash.Song | None
+        """
+        if segments is None:
+            segments = [None]
+
+        ret_song = None
+        for segment in segments:
+            song = self.get_song_for_segment(segment)
+            if song is not None:
+                logger.debug('Returned song {0}, score: {1}'
+                             .format(song, song.score))
+                if song.score > score:
+                    return song
+                if ret_song is None or song.score > ret_song.score:
+                    ret_song = song
+
+        logger.info('Found song: {0}'.format(ret_song))
+        # return the best found song or None
+        return ret_song
+
+    def get_song_for_segment(self, segment):
+        code = self.get_echoprint(segment)
+        if code is None:
+            return None
+
+        songs = self.moomash.identify(code)
+        if len(songs) == 0:
+            return None
+        return songs[0]
+
+    def get_echoprint(self, segments=None):
+        if segments is None:
+            segments = self._queue.maxlen
+        # maxlen is on purpose
+        start_index = max(0, self._queue.maxlen - segments)
+
+        logger.debug('{0}/{1} segments available, using last {2} segments'
+                     .format(len(self._queue), self._queue.maxlen, segments))
+
         with tempfile.NamedTemporaryFile() as fp:
-            for segment in self._queue:
+            for segment in islice(self._queue, start_index, self._queue.maxlen):
                 fp.write(segment)
             fp.flush()
 
             code = codegen(fp.name)
-            songs = self.moomash.identify(code)
-            return songs
+            if len(code) == 0 or 'error' in code[0]:
+                return None
+            return code[0]
 
 
 class CallbackRingBuffer(livestreamer.buffers.RingBuffer):

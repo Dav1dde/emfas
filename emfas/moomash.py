@@ -41,10 +41,12 @@ class MoomashAPI(object):
             url, data=payload, headers=self.HEADERS,
             params=[('api_key', self.api_key)]
         )
+        response.raise_for_status()
+
         j = response.json()
         logger.debug('Moomash response: {0!r}'.format(j))
-        if not response.ok:
-            raise MoomashAPIException.from_json(j)
+        if not j['response']['status']['code'] == 0:
+            raise MoomashAPIException.from_json(j['response']['status'])
 
         # sometimes songs looks like that...
         # {u'songs': [{}]}
@@ -71,7 +73,15 @@ class Song(object):
     def __setitem__(self, key, value):
         self.__dict__[key] = value
 
+    def __eq__(self, other):
+        if isinstance(other, Song):
+            return self.artist_name == other.artist_name and \
+                   self.title == other.title
+
+        return NotImplemented
+
     def __str__(self):
         if self.artist_name:
             return '{0} - {1}'.format(self.artist_name, self.title)
         return self.title
+
