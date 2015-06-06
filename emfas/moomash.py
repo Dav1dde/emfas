@@ -80,8 +80,11 @@ class Song(object):
 
         return NotImplemented
 
-    def __str__(self):
+    def __unicode__(self):
         if self.artist_name:
             return '{0} - {1}'.format(self.artist_name, self.title)
         return self.title
+
+    def __str__(self):
+        return unicode(self).encode('utf-8')
 

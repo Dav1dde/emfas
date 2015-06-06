@@ -16,14 +16,33 @@ from emfas import Emfas, TwitchSegmentProvider2, EmfasException
 
 logger = logging.getLogger('songbot')
 
+RATINGS = [(50, 'bad'), (100, 'ok'), (500, 'good'), (sys.maxint, 'amazing')]
 
 _URL_REGEX = re.compile(r'(\w+://)[^\s]{2,}\s*\.\s*(?P<tld>\w+)',
                         re.IGNORECASE | re.MULTILINE)
 _URL_REGEX2 = re.compile(r'\w+://', re.IGNORECASE)
+
+
 def filter_urls(s, repl=''):
     s = _URL_REGEX.sub(repl, s)
     s = _URL_REGEX2.sub('', s)
     return s
+
+
+def format_song(song, ratings=RATINGS):
+    text = filter_urls(unicode(song))
+    upper = sum(1 for c in text if c.isupper())
+    if upper > len(text)/2:
+        text = text.lower()
+
+    rating = None
+    for threshold, name in ratings:
+        if song.score < threshold:
+            rating = name
+            break
+
+    return 'Song: {0} | Accuracy: {1} ({2})' \
+        .format(text, song.score, rating)
 
 
 class SongBotException(Exception):
@@ -38,14 +57,12 @@ class NoSongFound(SongBotException):
     pass
 
 
-class SongBot(object):
-    RATINGS = [(50, 'bad'), (100, 'ok'),
-               (500, 'good'), (sys.maxint, 'amazing')]
-
+class BaseSongBot(object):
     def __init__(self, ident, broadcaster, api_key):
         self.client = EasyClient(ident, 'irc.twitch.tv', port=6667)
 
         self.broadcaster = broadcaster
+        self.channel = None
 
         self._restart_delay = 300
         self._rate_limit = 30
@@ -59,9 +76,18 @@ class SongBot(object):
         signals.on_registered.connect(self._join, sender=self.client)
         signals.m.on_PUBMSG.connect(self.on_pubmsg, sender=self.client)
 
+    def connect(self):
+        logger.info('Connecting as: \'{0}\''
+                    .format(self.client.identity.nick))
+        return self.client.connect()
+
+    def send(self, text):
+        self.client.privmsg(self.channel, text)
+
     def _join(self, *args, **kwargs):
-        logger.info('Joining channel #{0}'.format(self.broadcaster))
-        self.client.join_channel('#{0}'.format(self.broadcaster))
+        self.channel = '#{0}'.format(self.broadcaster)
+        logger.info('Joining channel {0}'.format(self.channel))
+        self.client.join_channel(self.channel)
 
     def _start_emfas(self):
         logger.debug('Starting emfas')
@@ -86,62 +112,70 @@ class SongBot(object):
         # start if an exception occurred
         gevent.spawn_later(self._restart_delay, self._start_emfas)
 
-    def connect(self):
-        logger.info('Connecting as: \'{0}\''
-                    .format(self.client.identity.nick))
-        return self.client.connect()
-
     def on_pubmsg(self, client, prefix, target, args):
         text = args[0].strip().lower()
 
         if text.startswith('!song'):
             logger.debug('Found song command')
-            self.on_song(target)
+            self.on_song()
 
-    def on_song(self, target):
-        now = time.time()
-        if now - self._last_fetch[0] < self._rate_limit:
-            last_message = self._last_fetch[1]
-            logger.debug('Rate limit in effect, last song: {0!r}'
-                         .format(last_message))
-            if last_message is not None:
-                self.client.privmsg(target, last_message)
+    def on_song(self):
+        since = time.time() - self._last_fetch[0]
+        if since < self._rate_limit:
+            last_song = self._last_fetch[1]
+            logger.debug('Rate limit in effect, last song: {0}'
+                         .format(last_song))
+            self.handle_rate_limited(since, last_song)
             return
+        # stop gevent race conditions
+        self._last_fetch = (time.time(), None)
 
-        text = None
+        song = None
         try:
-            text = self.get_formatted_song()
+            song = self.get_song()
         except SongBotException as e:
             logger.debug(str(e))
+            self.handle_song_error(e)
         else:
-            logger.debug('Sending: \'{0}\''.format(text))
-            self.client.privmsg(target, text)
+            logger.debug('Got song: \'{0}\''.format(song))
+            self.handle_song(song)
 
-        self._last_fetch = (time.time(), text)
+        # no need to worry about race conditions, set it properly
+        self._last_fetch = (time.time(), song)
 
-    def get_formatted_song(self):
+    def get_song(self):
         if not self.emfas.is_running:
             raise EmfasNotRunning('Emfas is not running')
 
         song = self.emfas.identify(segments=self._identify_segments)
         if song is None:
-            raise NoSongFound('No song could identified')
+            raise NoSongFound('No song could be identified')
 
-        text = filter_urls(str(song))
-        upper = sum(1 for c in text if c.isupper())
-        if upper > len(text)/2:
-            text = text.lower()
+        return song
 
-        rating = None
-        for threshold, name in self.RATINGS:
-            if song.score < threshold:
-                rating = name
-                break
+    def handle_rate_limited(self, time_since, last_message):
+        raise NotImplementedError
 
-        text = 'Song: {0} | Accuracy: {1} ({2})'\
-            .format(text, song.score, rating)
+    def handle_song(self, song):
+        raise NotImplementedError
 
-        return text
+    def handle_song_error(self, exc):
+        raise NotImplementedError
+
+
+class SongBot(BaseSongBot):
+    def __init__(self, ident, broadcaster, api_key):
+        BaseSongBot.__init__(self, ident, broadcaster, api_key)
+
+    def handle_rate_limited(self, time_since, last_song):
+        if last_song is not None:
+            self.send('Last {0}'.format(format_song(last_song)))
+
+    def handle_song(self, song):
+        self.send(format_song(song))
+
+    def handle_song_error(self, exc):
+        pass
 
 
 def main():
@@ -158,7 +192,7 @@ def main():
 
     if ns.debug:
         logging.basicConfig(
-            format='[%(asctime)s] %(name)s\t %(levelname)s:\t%(message)s',
+            format='[%(asctime)s][%(levelname)s\t][%(name)-7s\t]: %(message)s',
             datefmt='%m/%d/%Y %H:%M:%S', level=logging.DEBUG
         )
         logging.getLogger('requests.packages.urllib3.connectionpool')\
@@ -170,7 +204,7 @@ def main():
     def print_song(*args, **kwargs):
         print '[INTERRUPT]',
         try:
-            print songbot.get_formatted_song()
+            print songbot.get_song()
         except SongBotException as e:
             print e
 
