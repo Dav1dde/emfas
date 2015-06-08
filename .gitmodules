@@ -1,0 +1,3 @@
+[submodule "python-echoprint"]
+	path = python-echoprint
+	url = https://github.com/Dav1dde/python-echoprint.git

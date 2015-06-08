@@ -2,5 +2,7 @@ __pycache__
 *.pyc
 .idea
 interactive.py
+interactiveffmpeg.py
 dump.py
 log.py
+libav.py
