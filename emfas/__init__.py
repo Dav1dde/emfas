@@ -98,8 +98,12 @@ class Emfas(object):
         logger.debug('{0}/{1} segments available, using last {2} segments'
                      .format(len(self._queue), self._queue.maxlen, segments))
 
+        segments = islice(self._queue, start_index, self._queue.maxlen)
+        return self._get_echoprint(segments)
+
+    def _get_echoprint(self, segments):
         with tempfile.NamedTemporaryFile() as fp:
-            for segment in islice(self._queue, start_index, self._queue.maxlen):
+            for segment in segments:
                 fp.write(segment)
             fp.flush()
 
