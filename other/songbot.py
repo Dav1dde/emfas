@@ -68,7 +68,7 @@ class BaseSongBot(object):
         self._rate_limit = 30
         self._last_fetch = (0, None)
 
-        self._identify_sizes = [60, 100, 150]
+        self._identify_sizes = [50, 100, 150]
         self.emfas = Emfas(api_key, buffer_length=150)
         self._start_emfas()
 

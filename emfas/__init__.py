@@ -213,7 +213,7 @@ class TwitchSegmentProvider(collections.Iterator):
                 raise EmfasException('Unable to find stream, offline?')
 
         self._fd = self._stream.open()
-        self._timeout = 15
+        self._timeout = 20
 
         self._segments = gevent.queue.Queue()
         size = self._fd.buffer.buffer_size
