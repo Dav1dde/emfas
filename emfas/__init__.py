@@ -1,4 +1,5 @@
 from __future__ import unicode_literals
+import struct
 
 from gevent import monkey
 monkey.patch_all()
@@ -11,10 +12,15 @@ import logging
 import tempfile
 import gevent.queue
 import gevent.pool
+from gevent import subprocess
 from itertools import islice
+
+import echoprint
 from emfas.codegen import codegen
 from emfas.moomash import MoomashAPI
 
+
+Unit = collections.namedtuple('Unit', ['size', 'name'])
 
 logger = logging.getLogger('emfas')
 
@@ -23,50 +29,55 @@ class EmfasException(Exception):
     pass
 
 
-class Emfas(object):
-    def __init__(self, api_key, queue_items=20):
+class BaseEmfas(object):
+    UNIT = Unit(1, 'unit')
+
+    def __init__(self, api_key, buffer_size=20):
         self.moomash = MoomashAPI(api_key)
 
-        self._worker = None
-        self._queue = collections.deque([], queue_items)
+        self._is_running = False
+        self._worker_pool = gevent.pool.Group()
+        self._queue = collections.deque([], buffer_size*self.UNIT.size)
 
     @property
     def is_running(self):
-        return self._worker is not None
+        return self._is_running
 
-    def start(self, segment_provider):
+    def start(self, data_provider):
         self._queue = collections.deque([], self._queue.maxlen)
-        if self._worker is not None:
-            self._worker.kill(block=False)
-        self._worker = gevent.Greenlet(self._io_read, segment_provider)
-        self._worker.start()
+        self._worker_pool.kill()
+        self._is_running = True
+        let = self._worker_pool.spawn(self._io_read, data_provider)
         logger.info('Emfas worker started')
 
-    def _io_read(self, segment_provider):
+        return let
+
+    def _io_read(self, data_provider):
         try:
-            for item in segment_provider:
+            for item in data_provider:
                 self._queue.append(item)
         finally:
-            self._worker = None
-            segment_provider.close()
+            self._is_running = False
+            data_provider.close()
+            self._worker_pool.kill()
         logger.info('Emfas worker stopped')
 
-    def identify(self, segments=None, score=50):
+    def identify(self, buffer_sizes=None, score=50):
         """
         Identify the currently playing song
 
-        :param segments: A list of number of
-        segments to try and identify. If any segment yields a song,
+        :param buffer_sizes: A list of numbers of
+        buffers sizes to try and identify. If any segment yields a song,
         with an acceptable score, the song will be returned immediately.
         :return: A list of moomash.Song objects
         :rtype: emfas.moomash.Song | None
         """
-        if segments is None:
-            segments = [None]
+        if buffer_sizes is None:
+            buffer_sizes = [None]
 
         ret_song = None
-        for segment in segments:
-            song = self.get_song_for_segment(segment)
+        for buffer_size in buffer_sizes:
+            song = self.get_song_for_segment(buffer_size)
             if song is not None:
                 logger.debug('Returned song {0}, score: {1}'
                              .format(song, song.score))
@@ -79,8 +90,8 @@ class Emfas(object):
         # return the best found song or None
         return ret_song
 
-    def get_song_for_segment(self, segment):
-        code = self.get_echoprint(segment)
+    def get_song_for_segment(self, buffer_size):
+        code = self.get_echoprint(buffer_size)
         if code is None:
             return None
 
@@ -89,28 +100,90 @@ class Emfas(object):
             return None
         return songs[0]
 
-    def get_echoprint(self, segments=None):
-        if segments is None:
-            segments = self._queue.maxlen
+    def get_echoprint(self, buffer_size=None):
+        if buffer_size is None:
+            buffer_size = self._queue.maxlen
+        else:
+            buffer_size *= self.UNIT.size
+
         # maxlen is on purpose
-        start_index = max(0, self._queue.maxlen - segments)
+        start_index = max(0, self._queue.maxlen - buffer_size)
 
-        logger.debug('{0}/{1} segments available, using last {2} segments'
-                     .format(len(self._queue), self._queue.maxlen, segments))
+        logger.debug(
+            '{0}/{1} {name}s available, using last {2} {name}s'.format(
+                len(self._queue)/self.UNIT.size,
+                self._queue.maxlen/self.UNIT.size,
+                buffer_size/self.UNIT.size,
+                name=self.UNIT.name
+            )
+        )
 
-        segments = islice(self._queue, start_index, self._queue.maxlen)
-        return self._get_echoprint(segments)
+        data = islice(self._queue, start_index, self._queue.maxlen)
+        return self._get_echoprint(data)
 
-    def _get_echoprint(self, segments):
+    def _get_echoprint(self, data):
+        raise NotImplementedError
+
+
+class EmfasEchoprintExe(BaseEmfas):
+    # this works with segments, since you can't possibly
+    # know how long a segment is in seconds
+    UNIT = Unit(1, 'segment')
+
+    def _get_echoprint(self, data):
         with tempfile.NamedTemporaryFile() as fp:
-            for segment in segments:
-                fp.write(segment)
+            for datum in data:
+                fp.write(datum)
             fp.flush()
 
             code = codegen(fp.name)
             if len(code) == 0 or 'error' in code[0]:
                 return None
             return code[0]
+
+
+class FFmpegEmfas(BaseEmfas):
+    # the unit size is the sample rate
+    UNIT = Unit(11025, 'second')
+
+    def __init__(self, api_key, buffer_length=60):
+        BaseEmfas.__init__(self, api_key, buffer_length)
+
+    def _io_read(self, segment_provider):
+        process = subprocess.Popen([
+            'ffmpeg',
+            '-loglevel', 'warning',
+            '-i', '-',
+            '-ac', '1',
+            '-ar', '11025',
+            '-f', 's16le',
+            '-'
+        ], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+        def ffmpeg_processor():
+            while True:
+                sample = process.stdout.read(2)
+                if not sample:
+                    break
+                data = struct.unpack('<h', sample)[0] / 32768.0
+                self._queue.append(data)
+
+        let = self._worker_pool.spawn(ffmpeg_processor)
+        let.link(lambda g: process.terminate())
+
+        try:
+            for item in segment_provider:
+                process.stdin.write(item)
+        finally:
+            self._is_running = False
+            segment_provider.close()
+            self._worker_pool.kill()
+
+    def _get_echoprint(self, data):
+        return echoprint.codegen(data, 0)
+
+
+Emfas = FFmpegEmfas
 
 
 class CallbackRingBuffer(livestreamer.buffers.RingBuffer):

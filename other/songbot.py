@@ -68,9 +68,8 @@ class BaseSongBot(object):
         self._rate_limit = 30
         self._last_fetch = (0, None)
 
-        self._identify_segments = [15, 25, 35]
-        self.emfas = Emfas(api_key, queue_items=35)
-        self.sp = None
+        self._identify_sizes = [60, 100, 150]
+        self.emfas = Emfas(api_key, buffer_length=150)
         self._start_emfas()
 
         signals.on_registered.connect(self._join, sender=self.client)
@@ -94,7 +93,7 @@ class BaseSongBot(object):
 
         url = 'twitch.tv/{}'.format(self.broadcaster)
         try:
-            self.sp = TwitchSegmentProvider2(url)
+            data_provider = TwitchSegmentProvider2(url)
         except EmfasException as e:
             logger.debug('Unable to create segment provider: {0}, '
                          'retrying in {1} seconds'
@@ -104,8 +103,8 @@ class BaseSongBot(object):
         except Exception:
             logger.warn('Unknown exception', exc_info=True)
         else:
-            self.emfas.start(self.sp)
-            self.emfas._worker.link(lambda g: self._start_emfas())
+            let = self.emfas.start(data_provider)
+            let.link(lambda g: self._start_emfas())
             logger.info('Emfas started')
             return
 
@@ -147,7 +146,7 @@ class BaseSongBot(object):
         if not self.emfas.is_running:
             raise EmfasNotRunning('Emfas is not running')
 
-        song = self.emfas.identify(segments=self._identify_segments)
+        song = self.emfas.identify(buffer_sizes=self._identify_sizes)
         if song is None:
             raise NoSongFound('No song could be identified')
 
@@ -202,11 +201,10 @@ def main():
     songbot = SongBot(ident, ns.channel, ns.api_key)
 
     def print_song(*args, **kwargs):
-        print '[INTERRUPT]',
         try:
-            print songbot.get_song()
+            print '[INTERRUPT] {0}'.format(songbot.get_song())
         except SongBotException as e:
-            print e
+            print '[INTERRUPT] {0!r}'.format(e)
 
     gevent.signal(signal.SIGUSR1, print_song)
 
