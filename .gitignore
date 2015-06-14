@@ -6,3 +6,4 @@ interactiveffmpeg.py
 dump.py
 log.py
 libav.py
+echoprint-server

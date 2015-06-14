@@ -16,7 +16,7 @@ from gevent import subprocess
 from itertools import islice
 
 import echoprint
-from emfas.codegen import codegen
+import emfas.codegen
 from emfas.moomash import MoomashAPI
 
 
@@ -136,7 +136,7 @@ class EmfasEchoprintExe(BaseEmfas):
                 fp.write(datum)
             fp.flush()
 
-            code = codegen(fp.name)
+            code = emfas.codegen.codegen(fp.name)
             if len(code) == 0 or 'error' in code[0]:
                 return None
             return code[0]
