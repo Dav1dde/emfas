@@ -17,7 +17,7 @@ from itertools import islice
 
 import echoprint
 import emfas.codegen
-from emfas.moomash import MoomashAPI
+from emfas.identification import MoomashAPI
 
 
 Unit = collections.namedtuple('Unit', ['size', 'name'])
@@ -32,8 +32,8 @@ class EmfasException(Exception):
 class BaseEmfas(object):
     UNIT = Unit(1, 'unit')
 
-    def __init__(self, api_key, buffer_size=20):
-        self.moomash = MoomashAPI(api_key)
+    def __init__(self, identification_service=None, buffer_size=20):
+        self.identification_service = identification_service
 
         self._is_running = False
         self._worker_pool = gevent.pool.Group()
@@ -62,22 +62,24 @@ class BaseEmfas(object):
             self._worker_pool.kill()
         logger.info('Emfas worker stopped')
 
-    def identify(self, buffer_sizes=None, score=50):
+    def identify(self, buffer_sizes=None, score=50, identification_service=None):
         """
         Identify the currently playing song
 
         :param buffer_sizes: A list of numbers of
         buffers sizes to try and identify. If any segment yields a song,
         with an acceptable score, the song will be returned immediately.
-        :return: A list of moomash.Song objects
-        :rtype: emfas.moomash.Song | None
+        :return: A list of Song objects returned by the identification service
+        :rtype: emfas.identification.Song | None
         """
         if buffer_sizes is None:
             buffer_sizes = [None]
 
         ret_song = None
         for buffer_size in buffer_sizes:
-            song = self.get_song_for_segment(buffer_size)
+            song = self.get_song_for_segment(
+                buffer_size, identification_service=identification_service
+            )
             if song is not None:
                 logger.debug('Returned song {0}, score: {1}'
                              .format(song, song.score))
@@ -90,15 +92,20 @@ class BaseEmfas(object):
         # return the best found song or None
         return ret_song
 
-    def get_song_for_segment(self, buffer_size):
+    def get_song_for_segment(self, buffer_size, identification_service=None):
+        if buffer_size is None:
+            buffer_size = self._queue.maxlen
+
+        if identification_service is None:
+            identification_service = self.identification_service
+        if identification_service is None:
+            raise ValueError('No identification service available')
+
         code = self.get_echoprint(buffer_size)
         if code is None:
             return None
 
-        songs = self.moomash.identify(code)
-        if len(songs) == 0:
-            return None
-        return songs[0]
+        return identification_service.identify(code, buffer_size)
 
     def get_echoprint(self, buffer_size=None):
         if buffer_size is None:

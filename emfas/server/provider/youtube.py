@@ -85,7 +85,7 @@ class YoutubeProvider(Provider):
                 i, len(p['items']), item['playlist_meta']['title']))
             try:
                 song = YoutubeSong(item)
-            except (IOError, ValueError) as e:
+            except Exception as e:
                 logger.info('skipping because of "{0}"'.format(e))
             else:
                 logger.debug('got song: {0}'.format(song))

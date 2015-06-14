@@ -12,7 +12,7 @@ import logging
 import argparse
 import re
 from emfas import Emfas, TwitchSegmentProvider2, EmfasException
-
+from emfas.identification import MoomashAPI, EchoprintServerAPI, IdentificationService
 
 logger = logging.getLogger('songbot')
 
@@ -57,6 +57,19 @@ class NoSongFound(SongBotException):
     pass
 
 
+class CombinedIdentificationService(IdentificationService):
+    def __init__(self, *args):
+        self.services = args
+
+    def identify(self, code, buffer_size):
+        for service, buffer_sizes in self.services:
+            if buffer_sizes is not None and buffer_size not in buffer_sizes:
+                continue
+
+            song = service.identify(code, buffer_size)
+            return song
+
+
 class BaseSongBot(object):
     def __init__(self, ident, broadcaster, api_key):
         self.client = EasyClient(ident, 'irc.twitch.tv', port=6667)
@@ -68,8 +81,12 @@ class BaseSongBot(object):
         self._rate_limit = 30
         self._last_fetch = (0, None)
 
-        self._identify_sizes = [50, 100, 150]
-        self.emfas = Emfas(api_key, buffer_length=150)
+        self._identify_sizes = [15, 30, 50, 70, 100, 120, 150]
+        identification_service = CombinedIdentificationService(
+            (EchoprintServerAPI(), None),
+            (MoomashAPI(api_key), [50, 100,  150])
+        )
+        self.emfas = Emfas(identification_service, buffer_length=150)
         self._start_emfas()
 
         signals.on_registered.connect(self._join, sender=self.client)
@@ -115,14 +132,14 @@ class BaseSongBot(object):
         text = args[0].strip().lower()
 
         if text.startswith('!song'):
-            logger.debug('Found song command')
+            logger.info('Handling song command')
             self.on_song()
 
     def on_song(self):
         since = time.time() - self._last_fetch[0]
         if since < self._rate_limit:
             last_song = self._last_fetch[1]
-            logger.debug('Rate limit in effect, last song: {0}'
+            logger.info('Rate limit in effect, last song: {0}'
                          .format(last_song))
             self.handle_rate_limited(since, last_song)
             return
@@ -136,7 +153,8 @@ class BaseSongBot(object):
             logger.debug(str(e))
             self.handle_song_error(e)
         else:
-            logger.debug('Got song: \'{0}\''.format(song))
+            logger.info('Returning song: \'{song}\', score: {song.score}'
+                        .format(song=song))
             self.handle_song(song)
 
         # no need to worry about race conditions, set it properly
@@ -196,6 +214,8 @@ def main():
         )
         logging.getLogger('requests.packages.urllib3.connectionpool')\
             .setLevel(logging.WARNING)
+        logging.getLogger('emfas.server.lib.fp')\
+            .setLevel(logging.WARNING)
 
     ident = Identity(ns.username, password=ns.password)
     songbot = SongBot(ident, ns.channel, ns.api_key)
@@ -206,7 +226,14 @@ def main():
         except SongBotException as e:
             print '[INTERRUPT] {0!r}'.format(e)
 
+    def print_song2(*args, **kwargs):
+        if not songbot.emfas.is_running:
+            print '[INTERRUPT] Emfas not running'
+        else:
+            print songbot.emfas.identify(None)
+
     gevent.signal(signal.SIGUSR1, print_song)
+    gevent.signal(signal.SIGUSR2, print_song2)
 
     songbot.connect().get()
     songbot.client._io_workers.join()
