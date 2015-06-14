@@ -67,7 +67,8 @@ class CombinedIdentificationService(IdentificationService):
                 continue
 
             song = service.identify(code, buffer_size)
-            return song
+            if song and song.score > 50:
+                return song
 
 
 class BaseSongBot(object):
