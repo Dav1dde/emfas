@@ -100,6 +100,20 @@ def decode_code_string(compressed_code_string):
     return actual_code
 
 
+def encode_code_string(uncompressed_code_string):
+    uncompressed_code_string = uncompressed_code_string.encode('utf-8')
+    if not uncompressed_code_string:
+        return ''
+
+    try:
+        compressed = base64.urlsafe_b64encode(zlib.compress(uncompressed_code_string))
+    except (zlib.error, TypeError):
+        logger.warn('Could not compress codestring')
+        return None
+
+    return compressed
+
+
 def cut_code_string_length(code_string):
     """ Remove all codes from a codestring that are > 60 seconds in length.
     Because we can only match 60 sec, everything else is unnecessary """

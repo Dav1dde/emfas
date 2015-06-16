@@ -1,4 +1,5 @@
 from __future__ import unicode_literals
+import emfas.server.lib.fp
 import re
 
 
@@ -42,7 +43,7 @@ class Song(object):
             'track_id': self.track_id,
             'fp': self.fp,
             'length': self.length,
-            'codever': self.codever,
+            'codever': '{0:.2f}'.format(float(self.codever)),
         }
 
         for name, value in [('artist', self.artist), ('release', self.release),
@@ -52,6 +53,20 @@ class Song(object):
                 data[name] = value
 
         return data
+
+    def to_echoprint(self):
+        return {
+            'code': emfas.server.lib.fp.encode_code_string(self.fp),
+            'metadata': {
+                'track_id': self.track_id,
+                'artist': self.artist,
+                'title': self.track,
+                'release': self.release,
+                'version': self.codever,
+                'duration': self.length,
+                'source': self.source
+            }
+        }
 
     def __str__(self):
         return unicode(self).encode('utf-8')

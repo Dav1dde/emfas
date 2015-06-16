@@ -1,4 +1,5 @@
 from __future__ import unicode_literals
+import base64
 import logging
 
 from emfas.server.provider import Provider
@@ -22,8 +23,10 @@ class YoutubeSong(Song):
         if artist is None or title is None:
             raise ValueError('Unable to extract artist or title')
 
-        track_id = 'yt_{0}'.format(meta['encrypted_id'])
-
+        # generate id from youtube id, to avoid duplicates
+        track_id = 'YT{0}'.format(
+            base64.b16encode(meta['encrypted_id'])
+        )
         Song.__init__(
             self,
             track_id=track_id,
