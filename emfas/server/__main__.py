@@ -2,10 +2,26 @@ import argparse
 import logging
 import itertools
 import datetime
+import signal
+from emfas.server.utils import (
+    ijson, grouper, SimpleJSONArrayWriter, NullWriter, committing
+)
 from emfas.server import EchoprintServer
 from emfas.server.song import Song
 import emfas.server.provider
 import emfas.server.lib.fp
+
+
+def _ingest_dry_run(es, w, itr, check_duplicates=False):
+    for song in itr:
+        w.write(song.to_echoprint())
+
+
+def _ingest(es, w, itr, check_duplicates=False):
+    for song in itr:
+        es.ingest(song, commit=False,
+                  check_duplicates=check_duplicates)
+        w.write(song.to_echoprint())
 
 
 def ingest(ns):
@@ -15,9 +31,9 @@ def ingest(ns):
     :param ns: Namespace object with required config
     :return: None
     """
-    from emfas.server.utils import SimpleJSONArrayWriter, NullWriter, committing
-
-    es = EchoprintServer(solr_url=ns.solr, tyrant_address=(ns.tyrant_host, ns.tyrant_port))
+    es = EchoprintServer(
+        solr_url=ns.solr, tyrant_address=(ns.tyrant_host, ns.tyrant_port)
+    )
 
     itr = None
     for provider in emfas.server.provider.provider:
@@ -33,14 +49,12 @@ def ingest(ns):
     if ns.dump:
         writer = SimpleJSONArrayWriter(ns.dump)
 
-    with committing(es), writer as w:
-        for song in itr:
-            added = True
-            if not ns.dry_run:
-                added = es.ingest(song, commit=False)
+    func = _ingest
+    if ns.dry_run:
+        func = _ingest_dry_run
 
-            if added:
-                w.write(song.to_echoprint())
+    with committing(es), writer as w:
+        func(es, w, itr, check_duplicates=ns.check_duplicates)
 
 
 def fastingest(ns):
@@ -49,43 +63,31 @@ def fastingest(ns):
     echoprint server utility, which will eat all of you RAM.
 
     :param ns: Namespace object with required config
-    :return:
+    :return: None
     """
-    from emfas.server.utils import ijson, committing
-
-    es = EchoprintServer(solr_url=ns.solr, tyrant_address=(ns.tyrant_host, ns.tyrant_port))
+    es = EchoprintServer(
+        solr_url=ns.solr, tyrant_address=(ns.tyrant_host, ns.tyrant_port)
+    )
     import_date = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    status = 0
+    start_time = datetime.datetime.utcnow()
+
+    def signal_handler(signum, frame):
+        diff = datetime.datetime.utcnow() - start_time
+        print '{0}, {1}'.format(diff, status)
+    signal.signal(signal.SIGUSR1, signal_handler)
 
     with committing(es), open(ns.path) as f:
         data = ijson.items(f, 'item')
 
         for item in data:
-            # see if there is an already decoded string
-            decoded_code = item.get('fp')
-
-            # if there is an encoded string, use that one
-            code = item.get('code')
-            if code is not None:
-                decoded_code = emfas.server.lib.fp.decode_code_string(code)
-
-            # neither decoded or encoded, continue
-            if decoded_code is None:
-                continue
-
-            metadata = item['metadata']
-            if 'track_id' not in metadata:
-                metadata['track_id'] = emfas.server.lib.fp.new_track_id()
-
-            song = Song(
-                track_id=metadata['track_id'], fp=decoded_code,
-                artist=metadata.get('artist'), release=metadata.get('release'),
-                track=metadata.get('title'), length=metadata['duration'],
-                codever=metadata['version'], source=metadata.get('source'),
-                import_date=import_date
-            )
-
-            # don't commit, the contextmanager (with) takes care of it
-            es.ingest(song, commit=False)
+            song = Song.from_echoprint(item, import_date=import_date)
+            if song is not None:
+                # don't commit, the contextmanager (with) takes care of it
+                es.ingest(song, commit=False,
+                          check_duplicates=ns.check_duplicates)
+            status += 1
 
 
 def split(ns):
@@ -96,8 +98,6 @@ def split(ns):
     :param ns: Namespace object with required config
     :return: None
     """
-    from emfas.server.utils import ijson, grouper, SimpleJSONArrayWriter
-
     with open(ns.path) as f:
         data = ijson.items(f, 'item')
         counter = itertools.count(start=1)
@@ -110,6 +110,26 @@ def split(ns):
                     w.write(item)
 
 
+_IGNORED_SIZE_EVENTS = ('end_map', 'end_array', 'map_key')
+
+def size(ns):
+    """
+    Count the items of a json file (e.g. a echoprint dump)
+
+    :param ns: Namespace object with required config
+    :return: The size
+    """
+    s = 0
+    with open(ns.path) as f:
+        events = ijson.parse(f)
+
+        for space, event, data in events:
+            if space == 'item' and event not in _IGNORED_SIZE_EVENTS:
+                s += 1
+
+    return s
+
+
 def main():
     parser = argparse.ArgumentParser('emfas.server')
     parser.add_argument('--solr', default='http://localhost:8502/solr/fp')
@@ -119,16 +139,21 @@ def main():
 
     subparsers = parser.add_subparsers(dest='subparser_name')
     ingest_parser = subparsers.add_parser('ingest')
-    ingest_parser.add_argument('url')
-    ingest_parser.add_argument('--dump')
+    ingest_parser.add_argument('--check-duplicates', action='store_true')
     ingest_parser.add_argument('--dry-run', action='store_true')
+    ingest_parser.add_argument('--dump')
+    ingest_parser.add_argument('url')
 
     fastingest_parser = subparsers.add_parser('fastingest')
+    fastingest_parser.add_argument('--check-duplicates', action='store_true')
     fastingest_parser.add_argument('path')
 
     split_parser = subparsers.add_parser('split')
     split_parser.add_argument('num_items', type=int)
     split_parser.add_argument('path')
+
+    size_parser = subparsers.add_parser('size')
+    size_parser.add_argument('path')
 
     ns = parser.parse_args()
 
@@ -139,12 +164,14 @@ def main():
         )
 
     commands = {
-        'ingest': ingest,
-        'fastingest': fastingest,
-        'split': split
+        'ingest': ingest, 'fastingest': fastingest,
+        'split': split, 'size': size
     }
 
-    commands[ns.subparser_name](ns)
+    logging.getLogger(__name__).info('Arguments: {0}'.format(ns))
+    ret = commands[ns.subparser_name](ns)
+    if ret is not None:
+        print ret
 
 
 if __name__ == '__main__':

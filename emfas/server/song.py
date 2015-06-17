@@ -1,5 +1,6 @@
 from __future__ import unicode_literals
 import emfas.server.lib.fp
+import datetime
 import re
 
 
@@ -67,6 +68,37 @@ class Song(object):
                 'source': self.source
             }
         }
+
+    @classmethod
+    def from_echoprint(cls, item, import_date=None):
+        if import_date is None:
+            import_date = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # see if there is an already decoded string
+        decoded_code = item.get('fp')
+
+        # if there is an encoded string, use that one
+        code = item.get('code')
+        if code is not None:
+            decoded_code = emfas.server.lib.fp.decode_code_string(code)
+
+        # neither decoded or encoded, continue
+        if decoded_code is None:
+            return
+
+        metadata = item['metadata']
+        if 'track_id' not in metadata:
+            metadata['track_id'] = emfas.server.lib.fp.new_track_id()
+
+        song = Song(
+            track_id=metadata['track_id'], fp=decoded_code,
+            artist=metadata.get('artist'), release=metadata.get('release'),
+            track=metadata.get('title'), length=metadata['duration'],
+            codever=metadata['version'], source=metadata.get('source'),
+            import_date=import_date
+        )
+
+        return song
 
     def __str__(self):
         return unicode(self).encode('utf-8')

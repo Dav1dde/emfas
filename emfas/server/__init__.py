@@ -12,9 +12,9 @@ class EchoprintServer(object):
     def commit(self):
         self.fp.commit()
 
-    def ingest(self, song, commit=True):
+    def ingest(self, song, check_duplicates=False, commit=True):
         logger.info('ingesting song: {0}'.format(song))
-        if self.fp.metadata_for_track_id(song.track_id):
+        if check_duplicates and self.fp.metadata_for_track_id(song.track_id):
             logger.info(' --> song already in database, skipping')
             return False
 
