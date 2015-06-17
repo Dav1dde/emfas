@@ -8,3 +8,4 @@ log.py
 libav.py
 echoprint-server
 dumps
+cffiijson

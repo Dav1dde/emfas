@@ -1,16 +1,23 @@
 from contextlib import contextmanager
 import itertools
+import warnings
 import os
 import json
 
 try:
-    from ijson.backends import yajl2 as ijson
+    from emfas.server.lib.other import ijsoncffi as ijson
 except ImportError:
     try:
-        from ijson.backends import yajl as ijson
+        from ijson.backends import yajl2 as ijson
     except ImportError:
-        from ijson.backends import python as ijson
-
+        try:
+            from ijson.backends import yajl as ijson
+        except ImportError:
+            from ijson.backends import python as ijson
+            warnings.warn(
+                'Using python implementation, this will be slow! '
+                'Install yajl2 and cffi to make it faster.'
+            )
 
 def grouper(n, iterable):
     it = iter(iterable)
