@@ -1,3 +1,4 @@
+import functools
 from ijson import common
 from ijson.backends import YAJLImportError
 from cffi import FFI
@@ -80,58 +81,90 @@ YAJL_ALLOW_COMMENTS = 1
 YAJL_MULTIPLE_VALUES = 8
 
 
+def append_event_to_ctx(event):
+    def wrapper(func):
+        @functools.wraps(func)
+        def wrapped(ctx, *args, **kwargs):
+            value = func(*args, **kwargs)
+            ctx = ffi.from_handle(ctx)
+            ctx.append((event, value))
+            return 1
+        return wrapped
+    return wrapper
+
+
+@ffi.callback('int(void *ctx)')
+@append_event_to_ctx('null')
 def null():
     return None
 
+
+@ffi.callback('int(void *ctx, int val)')
+@append_event_to_ctx('boolean')
 def boolean(val):
     return bool(val)
 
+
+@ffi.callback('int(void *ctx, long long integerVal)')
+@append_event_to_ctx('integer')
 def integer(val):
     return int(val)
 
+
+@ffi.callback('int(void *ctx, double doubleVal)')
+@append_event_to_ctx('double')
 def double(val):
     return float(val)
 
-def number(val, len):
-    return common.number(ffi.string(val, maxlen=len))
 
-def string(val, len):
-    return ffi.string(val, maxlen=len)
+@ffi.callback('int(void *ctx, const char *numberVal, size_t numberLen)')
+@append_event_to_ctx('number')
+def number(val, length):
+    return common.number(ffi.string(val, maxlen=length))
 
+
+@ffi.callback('int(void *ctx, const unsigned char *stringVal, size_t stringLen)')
+@append_event_to_ctx('string')
+def string(val, length):
+    return ffi.string(val, maxlen=length)
+
+
+@ffi.callback('int(void *ctx)')
+@append_event_to_ctx('start_map')
 def start_map():
     return None
 
-def map_key(key, len):
-    return ffi.string(key, maxlen=len)
 
+@ffi.callback('int(void *ctx, const unsigned char *key, size_t stringLen)')
+@append_event_to_ctx('map_key')
+def map_key(key, length):
+    return ffi.string(key, maxlen=length)
+
+
+@ffi.callback('int(void *ctx)')
+@append_event_to_ctx('end_map')
 def end_map():
     return None
 
+
+@ffi.callback('int(void *ctx)')
+@append_event_to_ctx('start_array')
 def start_array():
     return None
 
+
+@ffi.callback('int(void *ctx)')
+@append_event_to_ctx('end_array')
 def end_array():
     return None
 
 
-_callback_data = [
-    # Mapping of JSON parser events to callback C types and value converters.
-    # Used to define the Callbacks structure and actual callback functions
-    # inside the parse function.
-    ('null', 'int(void * ctx)', null),
-    ('boolean', 'int(void * ctx, int boolVal)', boolean),
-    # "integer" and "double" aren't actually yielded by yajl since "number"
-    # takes precedence if defined
-    ('integer', 'int(void * ctx, long long integerVal)', integer),
-    ('double', 'int(void * ctx, double doubleVal)', double),
-    ('number', 'int(void * ctx, const char * numberVal, size_t numberLen)', number),
-    ('string', 'int(void * ctx, const unsigned char * stringVal, size_t stringLen)', string),
-    ('start_map', 'int(void * ctx)', start_map),
-    ('map_key', 'int(void * ctx, const unsigned char * key,size_t stringLen)', map_key),
-    ('end_map', 'int(void * ctx)', end_map),
-    ('start_array', 'int(void * ctx)', start_array),
-    ('end_array', 'int(void * ctx)', end_array)
-]
+_callback_data = (
+    # For more information about callbacks,
+    # take a look at the ctypes backend
+    null, boolean, integer, double, number, string,
+    start_map, map_key, end_map, start_array, end_array
+)
 
 
 def basic_parse(f, allow_comments=False, buf_size=64*1024,
@@ -145,21 +178,9 @@ def basic_parse(f, allow_comments=False, buf_size=64*1024,
     - multiple_values: allows the parser to parse multiple JSON objects
     """
     events = []
-    # TODO segfaults when this goes out of scope but c is still using the callback
-    # -> use the ctx with ffi.new_handle and ffi.from_handle
-    _store = []
-
-    def callback(event, func_type, func):
-        def c_callback(ctx, *args):
-            events.append((event, func(*args)))
-            return 1
-        cb = ffi.callback(func_type, python_callable=c_callback)
-        _store.append(cb)
-        return cb
-
-    callbacks = [callback(event, type, func) for event, type, func in _callback_data]
-    c_callbacks = ffi.new('yajl_callbacks*', tuple(callbacks))
-    handle = yajl.yajl_alloc(c_callbacks, ffi.NULL, ffi.NULL)
+    ctx = ffi.new_handle(events)
+    callbacks = ffi.new('yajl_callbacks*', _callback_data)
+    handle = yajl.yajl_alloc(callbacks, ffi.NULL, ctx)
     if allow_comments:
         yajl.yajl_config(handle, YAJL_ALLOW_COMMENTS, 1)
     if multiple_values:
@@ -182,7 +203,8 @@ def basic_parse(f, allow_comments=False, buf_size=64*1024,
 
             for event in events:
                 yield event
-            events = []
+
+            del events[:]
     finally:
         yajl.yajl_free(handle)
 
