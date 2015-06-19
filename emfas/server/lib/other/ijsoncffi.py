@@ -2,7 +2,7 @@ import functools
 from ijson import common
 from ijson.backends import YAJLImportError
 from cffi import FFI
-
+from ijson.compat import b2s
 
 ffi = FFI()
 ffi.cdef("""
@@ -120,13 +120,13 @@ def double(val):
 @ffi.callback('int(void *ctx, const char *numberVal, size_t numberLen)')
 @append_event_to_ctx('number')
 def number(val, length):
-    return common.number(ffi.string(val, maxlen=length))
+    return common.number(b2s(ffi.string(val, maxlen=length)))
 
 
 @ffi.callback('int(void *ctx, const unsigned char *stringVal, size_t stringLen)')
 @append_event_to_ctx('string')
 def string(val, length):
-    return ffi.string(val, maxlen=length)
+    return ffi.string(val, maxlen=length).decode('utf-8')
 
 
 @ffi.callback('int(void *ctx)')
@@ -138,7 +138,7 @@ def start_map():
 @ffi.callback('int(void *ctx, const unsigned char *key, size_t stringLen)')
 @append_event_to_ctx('map_key')
 def map_key(key, length):
-    return ffi.string(key, maxlen=length)
+    return b2s(ffi.string(key, maxlen=length))
 
 
 @ffi.callback('int(void *ctx)')
