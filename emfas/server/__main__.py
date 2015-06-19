@@ -80,6 +80,7 @@ def fastingest(ns):
         diff = datetime.datetime.utcnow() - start_time
         print '{0}, {1}'.format(diff, status)
     signal.signal(signal.SIGUSR1, signal_handler)
+    signal.siginterrupt(signal.SIGUSR1, False)
 
     with committing(es), open(ns.path) as f:
         data = ijson.items(f, 'item')
