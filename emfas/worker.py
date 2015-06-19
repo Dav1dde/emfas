@@ -80,14 +80,14 @@ class BaseEmfas(object):
                 buffer_size, identification_service=identification_service
             )
             if song is not None:
-                logger.debug('Returned song {0}, score: {1}'
-                             .format(song, song.score))
+                logger.debug('Returned song %s, score: %s',
+                             song, song.score)
                 if song.score > score:
                     return song
                 if ret_song is None or song.score > ret_song.score:
                     ret_song = song
 
-        logger.info('Found song: {0}'.format(ret_song))
+        logger.info('Found song: %s', ret_song)
         # return the best found song or None
         return ret_song
 
@@ -116,11 +116,12 @@ class BaseEmfas(object):
         start_index = max(0, self._queue.maxlen - buffer_size)
 
         logger.debug(
-            '{0}/{1} {name}s available, using last {2} {name}s'.format(
+            '%s/%s %s available, using last %s %ss'.format(
                 len(self._queue)/self.UNIT.size,
                 self._queue.maxlen/self.UNIT.size,
+                self.UNIT.name,
                 buffer_size/self.UNIT.size,
-                name=self.UNIT.name
+                self.UNIT.name
             )
         )
 

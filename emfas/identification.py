@@ -57,7 +57,7 @@ class MoomashAPI(IdentificationService):
         response.raise_for_status()
 
         j = response.json()
-        logger.debug('Moomash response: {0!r}'.format(j))
+        logger.debug('Moomash response: %r', j)
         if not j['response']['status']['code'] == 0:
             raise MoomashAPIException.from_json(j['response']['status'])
 
@@ -75,9 +75,8 @@ class EchoprintServerAPI(IdentificationService):
 
     def identify(self, data, buffer_size):
         response = self.fp.best_match_for_query(data['code'])
-        logger.debug('EchoprintServer response, {0} in {1}ms'.format(
-            response.message(), response.total_time)
-        )
+        logger.debug('EchoprintServer response, %s in %sms',
+                     response.message(), response.total_time)
         if not response.match():
             return None
 

@@ -80,17 +80,17 @@ class YoutubeProvider(Provider):
         )
 
     def load(self, playlist):
-        logger.info('parsing playlist: {0}'.format(playlist))
+        logger.info('parsing playlist: %s', playlist)
         p = pafy.get_playlist(playlist, basic=False)
 
         for i, item in enumerate(p['items'], start=1):
-            logger.info('processing item {0}/{1} - {2}'.format(
-                i, len(p['items']), item['playlist_meta']['title']))
+            logger.info('processing item %s/%s - %s',
+                i, len(p['items']), item['playlist_meta']['title'])
             try:
                 song = YoutubeSong(item)
             except Exception as e:
-                logger.info('skipping because of "{0}"'.format(e))
+                logger.info('skipping because of "%s"', e)
             else:
-                logger.debug('got song: {0}'.format(song))
+                logger.debug('got song: %s', song)
                 if song is not None:
                     yield song
