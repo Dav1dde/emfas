@@ -8,7 +8,6 @@ from emfas.server.utils import (
 )
 from emfas.server import EchoprintServer
 from emfas.server.song import Song
-import emfas.server.provider
 import emfas.server.lib.fp
 
 
@@ -31,6 +30,10 @@ def ingest(ns):
     :param ns: Namespace object with required config
     :return: None
     """
+    # import here so the other functions work even without the
+    # echoprint extension installed
+    import emfas.server.provider
+
     es = EchoprintServer(
         solr_url=ns.solr, tyrant_address=(ns.tyrant_host, ns.tyrant_port)
     )

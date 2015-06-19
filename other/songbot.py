@@ -11,7 +11,7 @@ from utopia import signals
 import logging
 import argparse
 import re
-from emfas import Emfas, TwitchSegmentProvider2, EmfasException
+from emfas.worker import Emfas, TwitchSegmentProvider2, EmfasException
 from emfas.identification import MoomashAPI, EchoprintServerAPI, IdentificationService
 
 logger = logging.getLogger('songbot')

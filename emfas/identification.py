@@ -3,7 +3,7 @@ from __future__ import unicode_literals
 import json
 import requests
 import logging
-import emfas.server.lib.fp
+import worker.server.lib.fp
 
 
 logger = logging.getLogger('emfas')
@@ -71,7 +71,7 @@ class MoomashAPI(IdentificationService):
 
 class EchoprintServerAPI(IdentificationService):
     def __init__(self, **kwargs):
-        self.fp = emfas.server.lib.fp.FingerPrinter(**kwargs)
+        self.fp = worker.server.lib.fp.FingerPrinter(**kwargs)
 
     def identify(self, data, buffer_size):
         response = self.fp.best_match_for_query(data['code'])

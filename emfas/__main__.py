@@ -5,7 +5,7 @@ import logging
 import gevent
 import sys
 
-from emfas import Emfas, TwitchSegmentProvider2
+from worker import Emfas, TwitchSegmentProvider2
 
 
 class LevelFilter(logging.Filter):
